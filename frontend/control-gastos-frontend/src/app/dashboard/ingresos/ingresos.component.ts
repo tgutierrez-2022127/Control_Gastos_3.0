@@ -1,13 +1,15 @@
-import { Component, OnInit, HostListener } from '@angular/core';
+import { Component, ChangeDetectorRef, OnInit, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { GastosService, Ingreso } from '../../services/gastos.service';
+import { AuthService } from '../../auth/auth.service';
+import { SesionTimerComponent } from '../sesion-timer.component';
 
 @Component({
   selector: 'app-ingresos',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SesionTimerComponent],
   template: `
     <div class="app-layout" (click)="cerrarDropdowns()">
       <!-- ===== SIDEBAR ===== -->
@@ -23,17 +25,20 @@ import { GastosService, Ingreso } from '../../services/gastos.service';
             <button class="sidebar-icon active" title="Ingresos">
               <i class="fas fa-university"></i>
             </button>
-            <button class="sidebar-icon" title="Transferencias" (click)="mostrarToast('Transferencias — Próximamente','info')">
+            <button class="sidebar-icon" title="Gastos" (click)="irGastos()">
               <i class="fas fa-exchange-alt"></i>
             </button>
-            <button class="sidebar-icon" title="Ahorros" (click)="mostrarToast('Ahorros — Próximamente','info')">
+            <button class="sidebar-icon" title="Ahorros" (click)="irAhorros()">
               <i class="fas fa-piggy-bank"></i>
             </button>
           </nav>
         </div>
-        <div class="sidebar-bottom" style="position:relative;width:100%;display:flex;justify-content:center;">
+        <div class="sidebar-bottom" style="position:relative;width:100%;display:flex;flex-direction:column;align-items:center;gap:8px;">
           <button class="sidebar-icon sidebar-settings" title="Configuración" (click)="toggleSettings($event)">
             <i class="fas fa-cog" [class.spin]="settingsAbierto"></i>
+          </button>
+          <button class="sidebar-icon sidebar-salir" title="Cerrar sesión" (click)="cerrarSesion()">
+            <i class="fas fa-sign-out-alt"></i>
           </button>
           <div class="settings-menu" *ngIf="settingsAbierto" (click)="$event.stopPropagation()">
             <button class="menu-item" (click)="irPerfil()"><i class="fas fa-user-circle"></i> Mi perfil</button>
@@ -89,11 +94,12 @@ import { GastosService, Ingreso } from '../../services/gastos.service';
                 </div>
               </div>
             </div>
+            <app-sesion-timer></app-sesion-timer>
             <div class="profile">
-              <div class="profile-photo"><i class="fas fa-user"></i></div>
+              <div class="profile-photo"><img *ngIf="fotoUsuario" [src]="fotoUsuario" alt="Foto de perfil"><i *ngIf="!fotoUsuario" class="fas fa-user"></i></div>
               <div class="profile-text">
                 <span class="profile-greeting">Hola</span>
-                <span class="profile-name">Admin</span>
+                <span class="profile-name">{{nombreUsuario}}</span>
               </div>
             </div>
           </div>
@@ -333,7 +339,7 @@ import { GastosService, Ingreso } from '../../services/gastos.service';
           </div>
           <div class="form-group">
             <label>Fecha</label>
-            <input type="date" [(ngModel)]="formData.fecha" class="form-input">
+            <input type="date" [(ngModel)]="formData.fecha" class="form-input" [max]="maxFecha" [attr.max]="maxFecha">
           </div>
           <div class="form-error" *ngIf="formError">{{formError}}</div>
         </div>
@@ -390,10 +396,10 @@ import { GastosService, Ingreso } from '../../services/gastos.service';
     .app-layout{display:grid;grid-template-columns:90px 1fr;height:100vh;background:#0B132B;font-family:'Inter','Segoe UI',system-ui,sans-serif;color:#FFFFFF;overflow:hidden;position:relative}
     .sidebar{background:#121212;border-radius:0 20px 20px 0;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:24px 0;z-index:10;animation:slide-left 0.6s cubic-bezier(0.22,1,0.36,1);border-right:1px solid rgba(22,160,133,0.06)}
     .sidebar-top{display:flex;flex-direction:column;align-items:center;gap:32px;width:100%}
-    .sidebar-logo{width:84px;height:84px;border-radius:50%;background:rgba(22,160,133,0.06);border:1px solid rgba(22,160,133,0.12);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;transition:all 0.3s ease;animation:sidebar-hud-pulse 3s ease-in-out infinite}
-    @keyframes sidebar-hud-pulse{0%,100%{box-shadow:0 0 10px rgba(22,160,133,0.08)}50%{box-shadow:0 0 18px rgba(22,160,133,0.15)}}
-    .sidebar-logo:hover{background:rgba(22,160,133,0.12);border-color:rgba(22,160,133,0.3);box-shadow:0 0 25px rgba(22,160,133,0.15)}
-    .sidebar-logo-img{width:100%;height:100%;padding:10px;object-fit:contain;background:transparent !important;position:relative;z-index:2}
+    .sidebar-logo{width:74px;height:74px;border-radius:50%;background:#FFFFFF;border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;transition:all 0.3s ease;box-shadow:0 4px 20px rgba(0,0,0,0.25),0 0 0 1px rgba(255,255,255,0.8);animation:sidebar-hud-pulse 3s ease-in-out infinite}
+    @keyframes sidebar-hud-pulse{0%,100%{box-shadow:0 4px 20px rgba(0,0,0,0.25),0 0 0 1px rgba(255,255,255,0.8)}50%{box-shadow:0 4px 24px rgba(0,0,0,0.3),0 0 18px rgba(22,160,133,0.12)}}
+    .sidebar-logo:hover{background:#FFFFFF;border-color:#FFFFFF;box-shadow:0 6px 28px rgba(0,0,0,0.3),0 0 25px rgba(22,160,133,0.15);transform:scale(1.03)}
+    .sidebar-logo-img{width:100%;height:100%;padding:8px;object-fit:contain;background:#FFFFFF !important;border-radius:50%;position:relative;z-index:2;display:block}
     .sidebar-menu{display:flex;flex-direction:column;align-items:center;gap:8px}
     .sidebar-icon{width:42px;height:42px;border:none;border-radius:12px;background:transparent;color:#A0AABC;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.3s cubic-bezier(0.22,1,0.36,1);position:relative;overflow:hidden;animation:slide-left 0.5s cubic-bezier(0.22,1,0.36,1) backwards}
     .sidebar-icon:nth-child(1){animation-delay:0.1s}.sidebar-icon:nth-child(2){animation-delay:0.2s}.sidebar-icon:nth-child(3){animation-delay:0.3s}.sidebar-icon:nth-child(4){animation-delay:0.4s}
@@ -403,7 +409,8 @@ import { GastosService, Ingreso } from '../../services/gastos.service';
     .sidebar-icon.active::after{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:20px;background:#D4FF00;border-radius:0 3px 3px 0;box-shadow:0 0 8px rgba(212,255,0,0.5)}
     .sidebar-settings{margin-top:auto}
     .sidebar-icon .spin{animation:spin 0.6s ease}
-    .settings-menu{position:absolute;bottom:50px;left:50%;transform:translateX(-20%);background:#181818;border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:6px;min-width:210px;z-index:30;box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:slide-up 0.3s cubic-bezier(0.22,1,0.36,1)}
+    .sidebar-salir:hover{color:#ff5c5c !important;background:rgba(255,92,92,.12)}.sidebar-salir:hover::before{opacity:0}
+    .settings-menu{position:absolute;left:calc(100% + 12px);top:50%;transform:translateY(-50%);background:#181818;border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:6px;min-width:210px;z-index:30;box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:slide-left 0.3s cubic-bezier(0.22,1,0.36,1)}
     .menu-item{width:100%;padding:11px 14px;border:none;border-radius:8px;background:transparent;color:#FFFFFF;font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;display:flex;align-items:center;gap:10px;transition:all 0.25s ease;text-align:left}
     .menu-item:hover{background:rgba(0,230,118,0.06);padding-left:18px}
     .menu-item i{color:#00E676;width:16px;text-align:center;font-size:13px}
@@ -421,6 +428,7 @@ import { GastosService, Ingreso } from '../../services/gastos.service';
     .header-action:hover{background:rgba(0,230,118,0.08);border-color:rgba(0,230,118,0.2);color:#00E676;transform:translateY(-2px) scale(1.05);box-shadow:0 4px 16px rgba(0,230,118,0.12)}
     .profile{display:flex;align-items:center;gap:10px;margin-left:6px}
     .profile-photo{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg, rgba(22,160,133,0.15), rgba(52,152,219,0.1));border:1.5px solid rgba(22,160,133,0.2);color:#00E676;display:flex;align-items:center;justify-content:center;font-size:14px;overflow:hidden}
+    .profile-photo img{width:100%;height:100%;object-fit:cover}
     .profile-text{display:flex;flex-direction:column;line-height:1.2}
     .profile-greeting{font-size:12px;color:#A0AABC}.profile-name{font-size:13px;font-weight:700;color:#00E676}
     .dashboard{flex:1;padding:0 28px 24px;overflow-y:auto;display:flex;flex-direction:column;gap:18px}
@@ -596,6 +604,7 @@ export class IngresosComponent implements OnInit {
   guardando = false;
   formError = '';
   formData = { descripcion: '', monto: 0, categoria: 'Salario', fecha: '' };
+  get maxFecha(): string { return new Date().toISOString().split('T')[0]; }
 
   mesActualNombre = '';
 
@@ -628,7 +637,15 @@ export class IngresosComponent implements OnInit {
     Otros: '#6b7280',
   };
 
-  constructor(private router: Router, private gastosService: GastosService) {}
+  constructor(private router: Router, private gastosService: GastosService, private authService: AuthService, private cdr: ChangeDetectorRef) {}
+
+  private usuarioLogueado: any = null;
+  get nombreUsuario(): string {
+    return this.usuarioLogueado?.fullName || 'Usuario';
+  }
+  get fotoUsuario(): string {
+    return this.usuarioLogueado?.avatar || '';
+  }
 
   ngOnInit(): void {
     const hoy = new Date();
@@ -645,12 +662,18 @@ export class IngresosComponent implements OnInit {
     }
     this.cargarNotificacionesIniciales();
     this.cargarDatos();
+    this.authService.currentUser$.subscribe((u) => {
+      if (u) {
+        this.usuarioLogueado = u;
+        this.cdr.detectChanges();
+      }
+    });
   }
 
   private cargarNotificacionesIniciales(){
     const stored = localStorage.getItem('fv_notificaciones');
     if(stored){ try{ const arr=JSON.parse(stored); this.notificaciones=arr; this.numNotificaciones=0; }catch{} }
-    const msgs = localStorage.getItem('fv_mensajes_ing');
+    const msgs = localStorage.getItem(this.authService.mensajeKey('_ing'));
     if(msgs){ try{ this.mensajes=JSON.parse(msgs);}catch{} }
     if(this.mensajes.length===0){
       this.mensajes = [{ de: 'FinVanguard', texto: 'Tu informe mensual está listo. Sigue registrando ingresos.', hora: 'Ahora' }];
@@ -835,6 +858,7 @@ export class IngresosComponent implements OnInit {
     if (!this.formData.descripcion.trim()) { this.formError = 'Ingresa un concepto'; return; }
     if (!this.formData.monto || this.formData.monto <= 0) { this.formError = 'Ingresa un monto mayor a 0'; return; }
     if (!this.formData.fecha) { this.formError = 'Selecciona una fecha'; return; }
+    if (this.formData.fecha > this.maxFecha) { this.formError = 'No se puede registrar un ingreso con fecha futura (hoy es ' + this.maxFecha + ')'; return; }
 
     this.guardando = true;
     this.gastosService.crearIngreso(this.formData).subscribe({
@@ -893,8 +917,8 @@ export class IngresosComponent implements OnInit {
     const hora = `${ahora.getHours()}:${String(ahora.getMinutes()).padStart(2,'0')}`;
     this.mensajes.unshift({de,texto,hora});
     if(this.mensajes.length>20) this.mensajes=this.mensajes.slice(0,20);
-    localStorage.setItem('fv_mensajes_ing', JSON.stringify(this.mensajes));
-    localStorage.setItem('fv_mensajes', JSON.stringify(this.mensajes));
+    localStorage.setItem(this.authService.mensajeKey('_ing'), JSON.stringify(this.mensajes));
+    localStorage.setItem(this.authService.mensajeKey(), JSON.stringify(this.mensajes));
     this.numMensajes = this.verMensajes?0:this.mensajes.length;
   }
   limpiarNotificaciones(){ this.notificaciones=[]; this.numNotificaciones=0; localStorage.removeItem('fv_notificaciones'); this.verNotificaciones=false; }
@@ -903,8 +927,8 @@ export class IngresosComponent implements OnInit {
   toggleNotificaciones(): void { this.verNotificaciones = !this.verNotificaciones; this.verMensajes = false; this.settingsAbierto=false; if(this.verNotificaciones) this.numNotificaciones=0; }
   toggleMensajes(): void { this.verMensajes = !this.verMensajes; this.verNotificaciones = false; this.settingsAbierto=false; if(this.verMensajes) this.numMensajes=0; }
   cerrarDropdowns(){ this.verNotificaciones=false; this.verMensajes=false; this.settingsAbierto=false; }
-  irPerfil(){ this.settingsAbierto=false; this.mostrarToast('Perfil: Admin • admin@kinal.org','info'); }
-  limpiarDatos(){ if(confirm('¿Borrar notificaciones y metas locales?')){ localStorage.removeItem('fv_notificaciones'); localStorage.removeItem('fv_mensajes'); localStorage.removeItem('fv_mensajes_ing'); localStorage.removeItem('metas'); this.notificaciones=[]; this.numNotificaciones=0; this.mostrarToast('Datos locales borrados','info'); this.settingsAbierto=false; } }
+  irPerfil(){ this.settingsAbierto=false; this.router.navigate(['/perfil']); }
+  limpiarDatos(){ if(confirm('¿Borrar notificaciones y metas locales?')){ localStorage.removeItem('fv_notificaciones'); localStorage.removeItem(this.authService.mensajeKey()); localStorage.removeItem(this.authService.mensajeKey('_ing')); localStorage.removeItem('metas'); this.notificaciones=[]; this.numNotificaciones=0; this.mostrarToast('Datos locales borrados','info'); this.settingsAbierto=false; } }
 
   mostrarToast(mensaje: string, tipo:'success'|'error'|'info'='success'): void {
     this.toastMensaje = mensaje;
@@ -915,8 +939,7 @@ export class IngresosComponent implements OnInit {
 
   cerrarSesion(): void {
     this.settingsAbierto=false;
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    this.authService.logout();
     this.router.navigate(['/']);
   }
 
@@ -959,4 +982,6 @@ export class IngresosComponent implements OnInit {
   }
 
   irDashboard(): void { this.router.navigate(['/dashboard']); }
+  irGastos(): void { this.router.navigate(['/gastos']); }
+  irAhorros(): void { this.router.navigate(['/ahorros']); }
 }

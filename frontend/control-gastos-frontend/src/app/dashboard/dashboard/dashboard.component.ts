@@ -1,13 +1,16 @@
-import { Component, OnInit, HostListener } from '@angular/core';
+import { Component, ChangeDetectorRef, OnInit, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { forkJoin } from 'rxjs';
 import { GastosService } from '../../services/gastos.service';
+import { AuthService } from '../../auth/auth.service';
+import { SesionTimerComponent } from '../sesion-timer.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SesionTimerComponent],
   template: `
     <div class="app-layout" (click)="cerrarDropdowns()">
       <!-- ===== SIDEBAR ===== -->
@@ -23,17 +26,20 @@ import { GastosService } from '../../services/gastos.service';
             <button class="sidebar-icon" title="Ingresos" (click)="irIngresos()">
               <i class="fas fa-university"></i>
             </button>
-            <button class="sidebar-icon" title="Transferencias" (click)="mostrarToast('Transferencias — Próximamente','info')">
+            <button class="sidebar-icon" title="Gastos" (click)="irGastos()">
               <i class="fas fa-exchange-alt"></i>
             </button>
-            <button class="sidebar-icon" title="Ahorros / Alcancía" (click)="mostrarToast('Ahorros — Próximamente','info')">
+            <button class="sidebar-icon" title="Ahorros" (click)="irAhorros()">
               <i class="fas fa-piggy-bank"></i>
             </button>
           </nav>
         </div>
-        <div class="sidebar-bottom" style="position:relative;width:100%;display:flex;justify-content:center;">
+        <div class="sidebar-bottom" style="position:relative;width:100%;display:flex;flex-direction:column;align-items:center;gap:8px;">
           <button class="sidebar-icon sidebar-settings" title="Configuración" (click)="toggleSettings($event)">
             <i class="fas fa-cog" [class.spin]="settingsAbierto"></i>
+          </button>
+          <button class="sidebar-icon sidebar-salir" title="Cerrar sesión" (click)="cerrarSesion()">
+            <i class="fas fa-sign-out-alt"></i>
           </button>
           <div class="settings-menu" *ngIf="settingsAbierto" (click)="$event.stopPropagation()">
             <button class="menu-item" (click)="irPerfil()"><i class="fas fa-user-circle"></i> Mi perfil</button>
@@ -93,13 +99,15 @@ import { GastosService } from '../../services/gastos.service';
                 <div class="notif-empty" *ngIf="sinMensajes">Sin mensajes</div>
               </div>
             </div>
+            <app-sesion-timer></app-sesion-timer>
             <div class="profile">
               <div class="profile-photo">
-                <i class="fas fa-user"></i>
+                <img *ngIf="fotoUsuario" [src]="fotoUsuario" alt="Foto de perfil">
+                <i *ngIf="!fotoUsuario" class="fas fa-user"></i>
               </div>
               <div class="profile-text">
                 <span class="profile-greeting">Hola</span>
-                <span class="profile-name">Admin</span>
+                <span class="profile-name">{{nombreUsuario}}</span>
               </div>
             </div>
           </div>
@@ -172,6 +180,8 @@ import { GastosService } from '../../services/gastos.service';
                   </defs>
                   <path [attr.d]="linePathD" fill="none" stroke="#D4FF00" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                   <path [attr.d]="linePathD + ' L320,80 L0,80 Z'" fill="url(#lineGrad)"/>
+                  <circle *ngFor="let p of linePuntos" [attr.cx]="p.x" [attr.cy]="p.y" r="3.5" class="line-pt"/>
+                  <text *ngFor="let p of linePuntos" [attr.x]="p.x" [attr.y]="p.y - 7" text-anchor="middle" class="line-val">{{p.txt}}</text>
                 </svg>
                 <div class="line-labels">
                   <span *ngFor="let l of lineLabels">{{l}}</span>
@@ -194,12 +204,17 @@ import { GastosService } from '../../services/gastos.service';
                     <span *ngFor="let y of yLabels">Q{{y}}</span>
                   </div>
                   <div class="bars-container">
+                    <div class="chart-gridlines">
+                      <div class="gridline" *ngFor="let y of yLabels"></div>
+                    </div>
                     <div class="bar-group" *ngFor="let b of barrasMeses; let i = index">
+                      <span class="bar-value" *ngIf="tieneMonto(b.monto)" title="Q{{b.monto | number:'1.2-2'}}">Q{{b.monto | number:'1.0-0'}}</span>
                       <div class="bar" [class.green-bar]="tieneMonto(b.monto)" [class.dark-bar]="!tieneMonto(b.monto)"
-                           [style.height.%]="b.altura">
+                           [class.bar-cur]="i === barrasMeses.length - 1"
+                           [style.height.%]="b.altura" [attr.title]="'Q' + b.monto">
                         <div class="bar-top"></div>
                       </div>
-                      <span class="bar-label">{{b.etiqueta}}</span>
+                      <span class="bar-label" [class.cur]="i === barrasMeses.length - 1">{{b.etiqueta}}</span>
                     </div>
                   </div>
                 </div>
@@ -228,21 +243,32 @@ import { GastosService } from '../../services/gastos.service';
                     <circle cx="100" cy="36" r="2.5" fill="#A0AABC"/>
                     <circle cx="148" cy="58" r="2.5" fill="#A0AABC"/>
                     <circle cx="172" cy="92" r="2.5" fill="#A0AABC"/>
+                    <text x="20" y="118" text-anchor="middle" class="gauge-txt">Q0</text>
+                    <text x="180" y="118" text-anchor="middle" class="gauge-txt">Q{{metaGauge | number:'1.0-0'}}</text>
                   </svg>
                 </div>
 
                 <p class="card-amount" [class.green]="isPositive" [class.red]="isNegative">Q{{totalBalanceStr}}</p>
-                <p class="card-sub" style="text-align:center;margin-bottom:10px;">Top categorías por gasto</p>
+                <p class="card-sub" style="text-align:center;margin-bottom:10px;">Composición del balance • ingresos y gastos</p>
 
                 <div class="categories">
-                  <div class="category-row" *ngFor="let c of categoriasTop" [class.filtered]="esFiltrado(c.nombre)">
+                  <div class="cat-grupo" *ngIf="ingresosTop.length"><i class="fas fa-arrow-down"></i> Ingresos por categoría</div>
+                  <div class="category-row" *ngFor="let c of ingresosTop" [class.filtered]="esFiltrado(c.nombre)">
+                    <span class="cat-dot" [style.background]="c.color"></span>
+                    <span class="cat-name">{{c.nombre}}</span>
+                    <span class="cat-amount green">Q{{c.monto}}</span>
+                    <span class="cat-pct">{{c.pct}}%</span>
+                  </div>
+                  <div class="cat-grupo" *ngIf="gastosTop.length"><i class="fas fa-arrow-up"></i> Gastos por categoría</div>
+                  <div class="category-row" *ngFor="let c of gastosTop" [class.filtered]="esFiltrado(c.nombre)">
                     <span class="cat-dot" [style.background]="c.color"></span>
                     <span class="cat-name">{{c.nombre}}</span>
                     <span class="cat-amount red">Q{{c.monto}}</span>
+                    <span class="cat-pct">{{c.pct}}%</span>
                   </div>
                   <div class="category-row" *ngIf="sinCategorias">
                     <span class="cat-dot" style="background:#3498DB"></span>
-                    <span class="cat-name">Sin gastos aún</span>
+                    <span class="cat-name">Sin registros aún</span>
                     <span class="cat-amount muted">Q0</span>
                   </div>
                 </div>
@@ -283,10 +309,10 @@ import { GastosService } from '../../services/gastos.service';
     .app-layout::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(22,160,133,0.02) 1px,transparent 1px),linear-gradient(90deg, rgba(22,160,133,0.02) 1px,transparent 1px);background-size:60px 60px;animation:hud-grid-scroll 30s linear infinite;pointer-events:none;z-index:0}
     .sidebar{background:#121212;border-radius:0 20px 20px 0;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:24px 0;z-index:10;animation:slide-left 0.6s cubic-bezier(0.22,1,0.36,1);border-right:1px solid rgba(22,160,133,0.06)}
     .sidebar-top{display:flex;flex-direction:column;align-items:center;gap:32px;width:100%}
-    .sidebar-logo{width:84px;height:84px;border-radius:50%;background:rgba(22,160,133,0.06);border:1px solid rgba(22,160,133,0.12);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;transition:all 0.3s ease;animation:sidebar-hud-pulse 3s ease-in-out infinite}
-    @keyframes sidebar-hud-pulse{0%,100%{box-shadow:0 0 10px rgba(22,160,133,0.08)}50%{box-shadow:0 0 18px rgba(22,160,133,0.15)}}
-    .sidebar-logo:hover{background:rgba(22,160,133,0.12);border-color:rgba(22,160,133,0.3);box-shadow:0 0 25px rgba(22,160,133,0.15)}
-    .sidebar-logo-img{width:100%;height:100%;padding:10px;object-fit:contain;background:transparent !important;position:relative;z-index:2}
+    .sidebar-logo{width:74px;height:74px;border-radius:50%;background:#FFFFFF;border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;transition:all 0.3s ease;box-shadow:0 4px 20px rgba(0,0,0,0.25),0 0 0 1px rgba(255,255,255,0.8);animation:sidebar-hud-pulse 3s ease-in-out infinite}
+    @keyframes sidebar-hud-pulse{0%,100%{box-shadow:0 4px 20px rgba(0,0,0,0.25),0 0 0 1px rgba(255,255,255,0.8)}50%{box-shadow:0 4px 24px rgba(0,0,0,0.3),0 0 18px rgba(22,160,133,0.12)}}
+    .sidebar-logo:hover{background:#FFFFFF;border-color:#FFFFFF;box-shadow:0 6px 28px rgba(0,0,0,0.3),0 0 25px rgba(22,160,133,0.15);transform:scale(1.03)}
+    .sidebar-logo-img{width:100%;height:100%;padding:8px;object-fit:contain;background:#FFFFFF !important;border-radius:50%;position:relative;z-index:2;display:block}
     .sidebar-menu{display:flex;flex-direction:column;align-items:center;gap:8px}
     .sidebar-icon{width:42px;height:42px;border:none;border-radius:12px;background:transparent;color:#A0AABC;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.3s cubic-bezier(0.22,1,0.36,1);position:relative;overflow:hidden;animation:slide-left 0.5s cubic-bezier(0.22,1,0.36,1) backwards}
     .sidebar-icon:nth-child(1){animation-delay:0.1s}.sidebar-icon:nth-child(2){animation-delay:0.2s}.sidebar-icon:nth-child(3){animation-delay:0.3s}.sidebar-icon:nth-child(4){animation-delay:0.4s}
@@ -296,8 +322,10 @@ import { GastosService } from '../../services/gastos.service';
     .sidebar-icon.active::after{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:20px;background:#D4FF00;border-radius:0 3px 3px 0;box-shadow:0 0 8px rgba(212,255,0,0.5)}
     .sidebar-settings{margin-top:auto;animation:slide-left 0.5s cubic-bezier(0.22,1,0.36,1) 0.5s backwards}
     .sidebar-icon .spin{animation:spin 0.6s ease}
+    .sidebar-salir:hover{color:#ff5c5c !important}.sidebar-salir:hover::before{opacity:0}
+    .sidebar-salir:hover{background:rgba(255,92,92,.12)}
     .sidebar-bottom{position:relative}
-    .settings-menu{position:absolute;bottom:50px;left:50%;transform:translateX(-20%);background:#181818;border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:6px;min-width:210px;z-index:30;box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:slide-up 0.3s cubic-bezier(0.22,1,0.36,1)}
+    .settings-menu{position:absolute;left:calc(100% + 12px);top:50%;transform:translateY(-50%);background:#181818;border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:6px;min-width:210px;z-index:30;box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:slide-left 0.3s cubic-bezier(0.22,1,0.36,1)}
     .menu-item{width:100%;padding:11px 14px;border:none;border-radius:8px;background:transparent;color:#FFFFFF;font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;display:flex;align-items:center;gap:10px;transition:all 0.25s ease;text-align:left}
     .menu-item:hover{background:rgba(0,230,118,0.06);padding-left:18px}
     .menu-item i{color:#00E676;width:16px;text-align:center;font-size:13px}
@@ -329,6 +357,7 @@ import { GastosService } from '../../services/gastos.service';
     .msg-avatar{font-size:22px;color:#16A085}
     .profile{display:flex;align-items:center;gap:10px;margin-left:6px}
     .profile-photo{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg, rgba(22,160,133,0.15), rgba(52,152,219,0.1));border:1.5px solid rgba(22,160,133,0.2);color:#00E676;display:flex;align-items:center;justify-content:center;font-size:14px;overflow:hidden;transition:all 0.3s ease}
+    .profile-photo img{width:100%;height:100%;object-fit:cover}
     .profile-photo:hover{border-color:rgba(0,230,118,0.5);box-shadow:0 0 12px rgba(0,230,118,0.15)}
     .profile-text{display:flex;flex-direction:column;line-height:1.2}
     .profile-greeting{font-size:12px;color:#A0AABC}.profile-name{font-size:13px;font-weight:700;color:#00E676}
@@ -379,36 +408,50 @@ import { GastosService } from '../../services/gastos.service';
     .line-chart path:last-child{opacity:0;animation:fade-in 1s ease 2s forwards}
     .line-labels{display:flex;justify-content:space-between;margin-top:6px}
     .line-labels span{font-size:10px;color:#6b7280}
+    .line-pt{fill:#D4FF00;filter:drop-shadow(0 0 4px rgba(212,255,0,0.8))}
+    .line-val{font-size:9px;fill:#D4FF00;font-weight:700}
     .gastos-card{height:100%}
     .bar-chart-area{display:flex;gap:10px;flex:1;margin-top:16px;align-items:flex-end}
     .y-axis{display:flex;flex-direction:column;justify-content:space-between;padding-bottom:24px;flex-shrink:0}
-    .y-axis span{font-size:11px;color:#A0AABC;text-align:right;width:38px}
-    .bars-container{display:flex;align-items:flex-end;gap:10px;flex:1;padding-bottom:24px;border-bottom:1px solid rgba(255,255,255,0.06);height:100%;min-height:150px}
-    .bar-group{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;height:100%;justify-content:flex-end}
-    .bar{width:100%;max-width:40px;border-radius:10px 10px 4px 4px;transform-origin:bottom;animation:bar-grow 0.8s cubic-bezier(0.34,1.56,0.64,1) backwards;position:relative;overflow:hidden}
+    .y-axis span{font-size:11px;color:#A0AABC;text-align:right;width:42px;font-weight:600}
+    .bars-container{display:flex;align-items:flex-end;gap:10px;flex:1;padding-bottom:24px;border-bottom:1px solid rgba(255,255,255,0.06);height:100%;min-height:170px;position:relative}
+    .chart-gridlines{position:absolute;inset:0 0 24px 0;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+    .gridline{height:1px;background:rgba(255,255,255,0.06);border-top:1px dashed rgba(255,255,255,0.06)}
+    .bar-group{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;position:relative;z-index:1}
+    .bar-value{font-size:10px;color:#00E676;font-weight:800;background:rgba(0,230,118,0.14);padding:2px 6px;border-radius:6px;border:1px solid rgba(0,230,118,0.22);line-height:1;white-space:nowrap}
+    .bar{width:100%;max-width:46px;border-radius:10px 10px 4px 4px;transform-origin:bottom;animation:bar-grow 0.8s cubic-bezier(0.34,1.56,0.64,1) backwards;position:relative;overflow:hidden}
+    .bar.bar-cur{box-shadow:0 0 18px rgba(0,230,118,0.45);border-color:#00E676}
+    .bar-label.cur{color:#00E676;font-weight:800}
     .bar::after{content:'';position:absolute;top:0;left:-100%;width:50%;height:100%;background:linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);animation:bar-shine 3s ease-in-out infinite}
     .bar-group:nth-child(1) .bar{animation-delay:0.5s}.bar-group:nth-child(2) .bar{animation-delay:0.65s}.bar-group:nth-child(3) .bar{animation-delay:0.8s}.bar-group:nth-child(4) .bar{animation-delay:0.95s}.bar-group:nth-child(5) .bar{animation-delay:1.1s}.bar-group:nth-child(6) .bar{animation-delay:1.25s}
     .bar-top{width:100%;height:6px;border-radius:10px 10px 0 0}
-    .green-bar{background:linear-gradient(180deg, #00E676, #00D285);box-shadow:0 0 10px rgba(0,230,118,0.15)}
+    .green-bar{background:linear-gradient(180deg, #00E676, #00D285);box-shadow:0 0 10px rgba(0,230,118,0.22);border:1px solid rgba(0,230,118,0.25)}
     .green-bar .bar-top{background:#00E676;box-shadow:0 0 6px rgba(0,230,118,0.4)}
-    .dark-bar{background:linear-gradient(180deg, #2A3040, #1F2430)}
+    .dark-bar{background:linear-gradient(180deg, #2A3040, #1F2430);border:1px solid rgba(255,255,255,0.04);opacity:0.7}
     .dark-bar .bar-top{background:#2A3040}
-    .bar-label{font-size:11px;color:#A0AABC}
+    .bar-label{font-size:11px;color:#A0AABC;font-weight:600}
+    .bar-group:hover .bar{transform:scaleY(1.02);filter:brightness(1.1)}
     .no-data-hint{font-size:11px;color:#6b7280;text-align:center;margin-top:10px}
     .cartera-card{justify-content:flex-start}
     .gauge-wrap{display:flex;justify-content:center;margin:8px 0;position:relative}
     .gauge{width:170px;height:100px;animation:fade-in 0.8s ease-out 0.6s backwards}
     .gauge path:nth-child(2){stroke-dasharray:251;stroke-dashoffset:251;animation:gauge-draw 1.5s cubic-bezier(0.22,1,0.36,1) 0.8s forwards;filter:drop-shadow(0 0 4px rgba(0,230,118,0.4))}
     .gauge line{transform-origin:100px 100px;animation:needle-swing 1.5s cubic-bezier(0.22,1,0.36,1) 0.8s backwards}
-    .categories{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+    .categories{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-height:220px;overflow-y:auto;padding-right:4px}
+    .categories::-webkit-scrollbar{width:4px}.categories::-webkit-scrollbar-thumb{background:rgba(0,230,118,0.2);border-radius:9999px}
     .category-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid rgba(255,255,255,0.03);transition:all 0.3s ease;animation:slide-right 0.5s cubic-bezier(0.22,1,0.36,1) backwards}
     .category-row:nth-child(1){animation-delay:1s}.category-row:nth-child(2){animation-delay:1.15s}
-    .category-row:hover{background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.06)}
+    .category-row:hover{background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.06);transform:translateX(2px)}
     .category-row.filtered{opacity:0.3}
-    .cat-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;animation:dot-pulse 2s ease-in-out infinite}
-    .cat-name{flex:1;font-size:13px;color:#FFFFFF}
-    .cat-amount{font-size:13px;font-weight:600}
+    .cat-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;animation:dot-pulse 2s ease-in-out infinite;border:1.5px solid rgba(255,255,255,0.15)}
+    .cat-name{flex:1;font-size:13px;color:#FFFFFF;font-weight:500}
+    .cat-amount{font-size:13px;font-weight:700;min-width:62px;text-align:right}
+    .cat-pct{font-size:11px;color:#A0AABC;font-weight:700;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:6px;min-width:36px;text-align:center}
     .cat-amount.green{color:#00E676}.cat-amount.red{color:#E74C3C}.cat-amount.muted{color:#6b7280}
+    .cat-grupo{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:#00E676;text-transform:uppercase;letter-spacing:0.6px;margin:4px 0 2px;padding:0 2px}
+    .cat-grupo i{font-size:10px}
+    .cat-grupo + .category-row{animation-delay:0s}
+    .gauge-txt{fill:#A0AABC;font-size:10px;font-weight:600}
     .gauge-hint{font-size:11px;color:#6b7280;text-align:center;margin-top:10px;line-height:1.4}
     @media (max-width:1100px){.cards-grid{grid-template-columns:1fr 1fr}.col-3{grid-column:1 / -1}}
     @media (max-width:768px){.app-layout{grid-template-columns:1fr}.sidebar{display:none}.cards-grid{grid-template-columns:1fr}.header{padding:14px 16px}.search-box{width:180px}.profile-text{display:none}.main-title{font-size:1.8rem}}
@@ -436,9 +479,11 @@ export class DashboardComponent implements OnInit {
 
   barrasMeses: { etiqueta: string; monto: number; altura: number }[] = [];
   yLabels: string[] = ['0','0','0','0','0'];
-  categoriasTop: { nombre: string; monto: string; color: string }[] = [];
+  ingresosTop: { nombre: string; monto: string; color: string; pct: number }[] = [];
+  gastosTop: { nombre: string; monto: string; color: string; pct: number }[] = [];
 
   linePathD = 'M0,78 L320,78';
+  linePuntos: { x: number; y: number; txt: string }[] = [];
   lineLabels: string[] = [];
   gaugeArcD = 'M20,100 A80,80 0 0,1 22,96';
   needleX = 30;
@@ -467,9 +512,22 @@ export class DashboardComponent implements OnInit {
     Educacion: '#06b6d4',
     Hogar: '#f97316',
     Otros: '#6b7280',
+    Salario: '#00E676',
+    Bono: '#10b981',
+    Ventas: '#f1c40f',
+    Inversiones: '#8b5cf6',
+    Negocio: '#f97316',
+    Regalo: '#06b6d4',
   };
 
-  constructor(private router: Router, private gastosService: GastosService) {}
+  constructor(
+    private router: Router,
+    private gastosService: GastosService,
+    private authService: AuthService,
+    private cdr: ChangeDetectorRef
+  ) {}
+
+  private usuarioLogueado: any = null;
 
   ngOnInit(): void {
     const hoy = new Date();
@@ -477,6 +535,22 @@ export class DashboardComponent implements OnInit {
     this.mesNombre = nombres[hoy.getMonth()];
     this.cargarNotificacionesIniciales();
     this.cargarResumen();
+    this.gastosService.datosCambiaron$.subscribe(() => {
+      this.cargarResumen();
+    });
+    this.authService.currentUser$.subscribe((u) => {
+      if (u) {
+        this.usuarioLogueado = u;
+        this.cdr.detectChanges();
+      }
+    });
+  }
+
+  get nombreUsuario(): string {
+    return this.usuarioLogueado?.fullName || 'Usuario';
+  }
+  get fotoUsuario(): string {
+    return this.usuarioLogueado?.avatar || '';
   }
 
   private cargarNotificacionesIniciales(){
@@ -484,7 +558,7 @@ export class DashboardComponent implements OnInit {
     if(stored){
       try{ const arr = JSON.parse(stored); this.notificaciones = arr; this.numNotificaciones = arr.length; }catch{}
     }
-    const msgs = localStorage.getItem('fv_mensajes');
+    const msgs = localStorage.getItem(this.authService.mensajeKey());
     if(msgs){ try{ this.mensajes = JSON.parse(msgs);}catch{} }
     if(this.mensajes.length===0){
       this.mensajes = [{de:'FinVanguard', texto:'¡Bienvenido! Registra tus ingresos para ver el dashboard cobrar vida.', hora:'Ahora'}];
@@ -497,28 +571,33 @@ export class DashboardComponent implements OnInit {
   }
 
   cargarResumen(): void {
-    this.gastosService.resumenIngresos().subscribe({
-      next: (ing) => {
-        this.ingresosTotales = Number(ing.totalIngresos||0);
+    forkJoin({
+      ingresos: this.gastosService.resumenIngresos(),
+      gastos: this.gastosService.resumen()
+    }).subscribe({
+      next: ({ ingresos, gastos }) => {
+        this.ingresosTotales = Number(ingresos.totalIngresos || 0);
         this.ingresosTotalesStr = this.fmt(this.ingresosTotales);
-        this.actualizarBalance();
-        if(this.ingresosTotales>0) this.agregarNotificacion(`Ingresos totales Q${this.ingresosTotalesStr}`, 'Actualizado desde ingresos', '#00E676', false);
-      },
-      error: ()=> this.mostrarToast('No se pudo cargar ingresos','error')
-    });
 
-    this.gastosService.resumen().subscribe({
-      next: (r) => {
-        this.gastosTotales = Number(r.totalGastado||0);
+        this.gastosTotales = Number(gastos.totalGastado || 0);
         this.gastosTotalesStr = this.fmt(this.gastosTotales);
-        this.totalMesStr = this.fmt(r.totalMes);
-        this.totalAnioStr = this.fmt(r.totalAnio);
-        this.construirBarras(r.gastosMensuales||[]);
-        this.construirCategorias(r.porCategoria||{});
-        this.generarLinea(r.gastosMensuales||[]);
+        this.totalMesStr = this.fmt(gastos.totalMes);
+        this.totalAnioStr = this.fmt(gastos.totalAnio);
+
+        this.construirBarras(gastos.gastosMensuales || []);
+        this.construirCategorias(ingresos.porCategoria || {}, gastos.porCategoria || {});
+        this.generarLinea(gastos.gastosMensuales || []);
         this.actualizarBalance();
+
+        if (this.ingresosTotales > 0) this.agregarNotificacion(`Ingresos totales Q${this.ingresosTotalesStr}`, 'Actualizado desde ingresos', '#00E676', false);
       },
-      error: ()=> this.mostrarToast('No se pudo cargar gastos','error')
+      error: (err) => {
+        if (err && err.status === 401) {
+          this.authService.logout();
+          this.router.navigate(['/']);
+        }
+        this.mostrarToast('No se pudieron cargar los datos', 'error');
+      }
     });
   }
 
@@ -545,16 +624,25 @@ export class DashboardComponent implements OnInit {
     this.yLabels = [this.fmt(max), this.fmt(step*3), this.fmt(step*2), this.fmt(step), '0'];
   }
 
-  construirCategorias(porCategoria: Record<string,number>): void {
-    const orden = Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]).slice(0,3);
-    this.categoriasTop = orden.map(([nombre,monto])=> ({
+  construirCategorias(porIngreso: Record<string,number>, porGasto: Record<string,number>): void {
+    const totalIn = Object.values(porIngreso).reduce((s,v)=> s + Number(v), 0) || 1;
+    const totalGa = Object.values(porGasto).reduce((s,v)=> s + Number(v), 0) || 1;
+    this.ingresosTop = Object.entries(porIngreso).sort((a,b)=>Number(b[1])-Number(a[1])).map(([nombre,monto])=> ({
       nombre,
-      monto: Math.round(monto).toString(),
-      color: this.colores[nombre]||'#00E676'
+      monto: Number(monto).toFixed(2),
+      color: this.colores[nombre]||'#00E676',
+      pct: Math.round((Number(monto)/totalIn)*100)
+    }));
+    this.gastosTop = Object.entries(porGasto).sort((a,b)=>Number(b[1])-Number(a[1])).map(([nombre,monto])=> ({
+      nombre,
+      monto: Number(monto).toFixed(2),
+      color: this.colores[nombre]||'#E74C3C',
+      pct: Math.round((Number(monto)/totalGa)*100)
     }));
   }
 
   generarLinea(mensuales: {mes:string;monto:number}[]): void {
+    this.linePuntos = [];
     if(!mensuales.length){ this.linePathD='M0,78 L320,78'; this.lineLabels=[]; return; }
     const slice = mensuales.slice(-6);
     if(slice.every(m=>m.monto===0)){ this.linePathD='M0,78 L320,78'; this.lineLabels = slice.map(s=>s.mes.substring(0,3)); return; }
@@ -566,6 +654,7 @@ export class DashboardComponent implements OnInit {
       const x = i*paso;
       const y = 78 - (m.monto/max)*70;
       d += (i===0?'M':' L')+`${x.toFixed(1)},${y.toFixed(1)}`;
+      this.linePuntos.push({ x: Math.round(x*10)/10, y: Math.max(10, Math.round(y*10)/10), txt: 'Q'+Math.round(m.monto) });
     });
     this.linePathD = d;
     this.lineLabels = slice.map(s=>s.mes.substring(0,3));
@@ -604,7 +693,7 @@ export class DashboardComponent implements OnInit {
   limpiarNotificaciones(){ this.notificaciones=[]; this.numNotificaciones=0; this.guardarNotificaciones(); this.verNotificaciones=false; }
   filtrarBusqueda(){ if(this.busqueda.length>2) this.mostrarToast(`Filtrando: ${this.busqueda}`,'info'); }
 
-  irPerfil(){ this.settingsAbierto=false; this.mostrarToast('Perfil: Admin • admin@kinal.org','info'); }
+  irPerfil(){ this.settingsAbierto=false; this.router.navigate(['/perfil']); }
   limpiarDatos(){ if(confirm('¿Borrar notificaciones y metas locales?')){ localStorage.removeItem('fv_notificaciones'); localStorage.removeItem('fv_mensajes'); localStorage.removeItem('metas'); this.notificaciones=[]; this.numNotificaciones=0; this.mostrarToast('Datos locales borrados'); this.settingsAbierto=false; } }
 
   mostrarToast(mensaje:string, tipo:'success'|'error'|'info'='success'){
@@ -625,16 +714,18 @@ export class DashboardComponent implements OnInit {
   get tieneMensajes(): boolean { return this.numMensajes > 0; }
   get sinNotificaciones(): boolean { return this.notificaciones.length === 0; }
   get sinMensajes(): boolean { return this.mensajes.length === 0; }
-  get sinCategorias(): boolean { return this.categoriasTop.length === 0; }
+  get sinCategorias(): boolean { return this.ingresosTop.length === 0 && this.gastosTop.length === 0; }
   tieneMonto(m:number): boolean { return m > 0; }
   esFiltrado(nombre:string): boolean { return !!this.busqueda && nombre.toLowerCase().indexOf(this.busqueda.toLowerCase()) === -1; }
 
   private fmt(n:number): string { return Number(n||0).toFixed(2); }
 
   cerrarSesion(): void {
-    localStorage.removeItem('token'); localStorage.removeItem('user');
+    this.authService.logout();
     this.mostrarToast('Sesión cerrada');
     setTimeout(()=> this.router.navigate(['/']), 400);
   }
   irIngresos(): void { this.router.navigate(['/ingresos']); }
+  irGastos(): void { this.router.navigate(['/gastos']); }
+  irAhorros(): void { this.router.navigate(['/ahorros']); }
 }
