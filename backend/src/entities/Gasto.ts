@@ -22,6 +22,14 @@ export const CategoriaGasto = {
 
 export type CategoriaGastoType = typeof CategoriaGasto[keyof typeof CategoriaGasto];
 
+export const MetodoGasto = {
+  EFECTIVO: 'Efectivo',
+  TRANSFERENCIA: 'Transferencia',
+  TARJETA: 'Tarjeta',
+} as const;
+
+export type MetodoGastoType = typeof MetodoGasto[keyof typeof MetodoGasto];
+
 @Entity('gastos')
 export class Gasto {
   @PrimaryGeneratedColumn()
@@ -42,6 +50,13 @@ export class Gasto {
 
   @Column({ type: 'date' })
   fecha!: string;
+
+  @Column({
+    type: 'enum',
+    enum: MetodoGasto,
+    default: MetodoGasto.EFECTIVO,
+  })
+  metodo!: MetodoGastoType;
 
   @ManyToOne(() => User, { eager: false })
   @JoinColumn({ name: 'user_id' })

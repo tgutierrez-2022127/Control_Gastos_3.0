@@ -35,6 +35,9 @@ export class User {
   @Column({ name: 'full_name', length: 100 })
   fullName!: string;
 
+  @Column({ type: 'varchar', length: 500, nullable: true, default: null })
+  avatar!: string | null;
+
   @Column({ default: true })
   active!: boolean;
 
@@ -54,7 +57,7 @@ export class User {
   @BeforeInsert()
   @BeforeUpdate()
   async hashPassword() {
-    if (this.password) {
+    if (this.password && !/^\$2[aby]\$/.test(this.password)) {
       const salt = await bcrypt.genSalt(10);
       this.password = await bcrypt.hash(this.password, salt);
     }
