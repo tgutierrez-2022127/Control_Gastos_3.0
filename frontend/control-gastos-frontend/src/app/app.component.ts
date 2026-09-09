@@ -1,7 +1,11 @@
-import { Component, ChangeDetectorRef } from '@angular/core';
+import { Component, ChangeDetectorRef, NgZone, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
+import { Subscription } from 'rxjs';
+import { AuthService } from './auth/auth.service';
+import { SessionService } from './services/session.service';
+import { environment } from '../environments/environment';
 
 @Component({
   selector: 'app-root',
@@ -52,7 +56,7 @@ import { Router, RouterModule } from '@angular/router';
             <i class="fas fa-clock"></i>
           </div>
           <div class="alert-body">
-            <strong>Sesion expirada</strong>
+            <strong>Sesión expirada</strong>
             <span>Su sesión ha caducado. Por favor, inicia sesión nuevamente.</span>
           </div>
         </div>
@@ -114,6 +118,15 @@ import { Router, RouterModule } from '@angular/router';
             <span>Autenticando...</span>
           </span>
         </button>
+
+        <!-- Google Login -->
+        <div *ngIf="googleClienteConfigurado" class="google-divider">
+          <div class="divider-line"></div>
+          <span class="divider-text">o continúa con</span>
+          <div class="divider-line"></div>
+        </div>
+        <div *ngIf="googleClienteConfigurado" id="googleButton" class="google-btn-wrap"></div>
+        <div *ngIf="googleCargando" class="google-loading">Conectando con Google...</div>
 
         <div class="quick-actions">
           <button (click)="cargarAdmin()" class="quick-btn">
@@ -381,16 +394,18 @@ import { Router, RouterModule } from '@angular/router';
     }
 
     .shield-logo {
-      width: 220px;
-      height: 124px;
-      background: rgba(11,25,44,0.6);
-      border-radius: 20px;
-      border: 1.5px solid rgba(22,160,133,0.3);
+      width: 132px;
+      height: 132px;
+      background: #FFFFFF;
+      border-radius: 50%;
+      border: 2px solid rgba(22,160,133,0.35);
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: hidden;
       position: relative;
       z-index: 5;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.4);
       transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
       animation: hud-glow 2.5s ease-in-out infinite;
     }
@@ -408,8 +423,8 @@ import { Router, RouterModule } from '@angular/router';
       width: 100%;
       height: 100%;
       object-fit: contain;
-      border-radius: 16px;
-      background: transparent !important;
+      border-radius: 50%;
+      background: #FFFFFF !important;
       position: relative;
       z-index: 2;
     }
@@ -776,6 +791,40 @@ import { Router, RouterModule } from '@angular/router';
       margin-top: 20px;
     }
 
+    /* ========== GOOGLE LOGIN ========== */
+    .google-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 22px 0 14px;
+    }
+
+    .divider-line {
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(22, 160, 133, 0.25), transparent);
+    }
+
+    .divider-text {
+      font-size: 12px;
+      color: rgba(235, 243, 249, 0.4);
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+
+    .google-btn-wrap {
+      display: flex;
+      justify-content: center;
+      min-height: 44px;
+    }
+
+    .google-loading {
+      text-align: center;
+      color: rgba(52, 152, 219, 0.8);
+      font-size: 13px;
+      margin-top: 10px;
+    }
+
     .quick-btn {
       padding: 8px 20px;
       border-radius: 9999px;
@@ -974,72 +1023,131 @@ import { Router, RouterModule } from '@angular/router';
     }
   `]
 })
-export class AppComponent {
+export class AppComponent implements OnInit, OnDestroy {
   email: string = '';
   password: string = '';
   cargando: boolean = false;
+  googleCargando = false;
   mensaje: string = '';
   esError: boolean = false;
   logueado: boolean = false;
   usuario: any = null;
   showPassword: boolean = false;
   mensajeSesionExpirada: boolean = false;
-  private tokenTimer: any = null;
-  tokenExpiryTime: number | null = null;
-  tiempoRestante: string = '';
-  private countdownTimer: any = null;
 
-  constructor(private cdr: ChangeDetectorRef, private router: Router) {
+  googleClientId = environment.googleClientId;
+  get googleClienteConfigurado(): boolean { return !!this.googleClientId; }
+
+  private subs: Subscription[] = [];
+  private googleInitIntentos = 0;
+  private googleElemento: HTMLElement | null = null;
+  private googleCallback: (resp: any) => void;
+
+  constructor(
+    private cdr: ChangeDetectorRef,
+    private router: Router,
+    private authService: AuthService,
+    private sessionService: SessionService,
+    private ngZone: NgZone
+  ) {
     console.log('APP INICIADA');
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    this.authService.logout();
     this.logueado = false;
     this.usuario = null;
+    this.googleCallback = (resp: any) => this.ngZone.run(() => this.manejarCredencialGoogle(resp));
   }
 
-  private decodeToken(token: string): any {
-    try {
-      const payload = token.split('.')[1];
-      return JSON.parse(atob(payload));
-    } catch {
-      return null;
-    }
+  ngOnInit(): void {
+    this.subs.push(
+      this.authService.currentUser$.subscribe((user) => {
+        const haySesion = !!user && this.authService.isLoggedIn();
+        if (haySesion !== this.logueado) {
+          this.logueado = haySesion;
+          this.usuario = user || null;
+          this.cdr.detectChanges();
+          if (haySesion) {
+            this.sessionService.iniciar();
+          } else {
+            this.sessionService.detener();
+            this.inicializarGoogle();
+          }
+        }
+      }),
+      this.sessionService.sesionFinalizada$.subscribe((expirada) => {
+        if (expirada) {
+          this.mensajeSesionExpirada = true;
+          this.cdr.detectChanges();
+        }
+      })
+    );
+    this.inicializarGoogle();
   }
 
-  private programarExpiracion(token: string) {
-    if (this.tokenTimer) clearTimeout(this.tokenTimer);
-    if (this.countdownTimer) clearInterval(this.countdownTimer);
+  ngOnDestroy(): void {
+    this.subs.forEach((s) => s.unsubscribe());
+  }
 
-    const decoded = this.decodeToken(token);
-    if (decoded && decoded.exp) {
-      this.tokenExpiryTime = decoded.exp * 1000;
-      const expMs = this.tokenExpiryTime - Date.now();
-
-      if (expMs <= 0) {
-        this.cerrarSesion(true);
-        return;
+  private inicializarGoogle(): void {
+    if (!this.googleClienteConfigurado) return;
+    const w = window as any;
+    if (!w.google || !w.google.accounts || !w.google.accounts.id) {
+      if (this.googleInitIntentos < 90) {
+        this.googleInitIntentos++;
+        setTimeout(() => this.inicializarGoogle(), 500);
       }
-
-      console.log('Token expira en', Math.round(expMs / 1000), 'segundos');
-
-      this.tokenTimer = setTimeout(() => {
-        this.cerrarSesion(true);
-      }, expMs);
-
-      this.countdownTimer = setInterval(() => {
-        this.actualizarTiempoRestante();
-        this.cdr.detectChanges();
-      }, 1000);
+      return;
+    }
+    const el = document.getElementById('googleButton');
+    if (!el || el === this.googleElemento) return;
+    try {
+      w.google.accounts.id.initialize({
+        client_id: this.googleClientId,
+        callback: this.googleCallback,
+        ux_mode: 'popup',
+        auto_select: false,
+      });
+      w.google.accounts.id.renderButton(el, {
+        theme: 'outline',
+        size: 'large',
+        width: el.clientWidth || 300,
+        text: 'continue_with',
+        shape: 'pill',
+      });
+      this.googleElemento = el;
+      console.log('Botón de Google renderizado');
+    } catch (e) {
+      console.error('Error al iniciar Google:', e);
     }
   }
 
-  private actualizarTiempoRestante() {
-    if (!this.tokenExpiryTime) return;
-    const restante = Math.max(0, this.tokenExpiryTime - Date.now());
-    const segundos = Math.floor(restante / 1000);
-    const mins = Math.floor(segundos / 60);
-    const secs = segundos % 60;
-    this.tiempoRestante = `${mins}:${secs.toString().padStart(2, '0')}`;
+  private manejarCredencialGoogle(resp: any): void {
+    if (!resp || !resp.credential) {
+      this.mensaje = 'No se pudo obtener la credencial de Google';
+      this.esError = true;
+      this.cdr.detectChanges();
+      return;
+    }
+    this.googleCargando = true;
+    this.mensaje = '';
+    this.mensajeSesionExpirada = false;
+    this.cdr.detectChanges();
+
+    this.authService.loginGoogle(resp.credential).subscribe({
+      next: () => {
+        this.googleCargando = false;
+        try { (window as any)?.google?.accounts?.id?.disableAutoSelect(); } catch { /* ignore */ }
+        this.cdr.detectChanges();
+        this.router.navigate(['/dashboard']);
+      },
+      error: (err) => {
+        this.googleCargando = false;
+        this.mensaje = err?.error?.message || 'Error al iniciar sesión con Google';
+        this.esError = true;
+        this.cdr.detectChanges();
+      }
+    });
   }
 
   cargarAdmin() {
@@ -1058,7 +1166,7 @@ export class AppComponent {
     this.mensajeSesionExpirada = false;
   }
 
-  async iniciarSesion() {
+  iniciarSesion() {
     if (!this.email || !this.password) {
       this.mensaje = 'Completa todos los campos';
       this.esError = true;
@@ -1073,60 +1181,36 @@ export class AppComponent {
     this.mensajeSesionExpirada = false;
     this.cdr.detectChanges();
 
-    try {
-      const respuesta = await fetch('http://localhost:3000/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: this.email, password: this.password })
-      });
-
-      const datos = await respuesta.json();
-      this.cargando = false;
-
-      if (datos && datos.success) {
-        localStorage.setItem('token', datos.data.token);
-        localStorage.setItem('user', JSON.stringify(datos.data.user));
-
-        this.logueado = true;
-        this.usuario = datos.data.user;
-        this.mensaje = '';
+    this.authService.login(this.email, this.password).subscribe({
+      next: () => {
+        this.cargando = false;
         this.email = '';
         this.password = '';
-        this.mensajeSesionExpirada = false;
-
         this.cdr.detectChanges();
-        this.programarExpiracion(datos.data.token);
         this.router.navigate(['/dashboard']);
-      } else {
-        this.mensaje = datos?.message || 'Error al iniciar sesion';
+      },
+      error: (err) => {
+        this.cargando = false;
+        this.mensaje = err?.error?.message || 'Error al iniciar sesión';
         this.esError = true;
         this.cdr.detectChanges();
       }
-    } catch (error) {
-      console.error('Error:', error);
-      this.cargando = false;
-      this.mensaje = 'Error de conexión con el servidor';
-      this.esError = true;
-      this.cdr.detectChanges();
-    }
+    });
   }
 
   cerrarSesion(sesionExpirada: boolean = false) {
-    if (this.tokenTimer) { clearTimeout(this.tokenTimer); this.tokenTimer = null; }
-    if (this.countdownTimer) { clearInterval(this.countdownTimer); this.countdownTimer = null; }
-
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    this.authService.logout();
+    this.sessionService.detener();
     this.logueado = false;
     this.usuario = null;
     this.email = '';
     this.password = '';
     this.esError = false;
-    this.tokenExpiryTime = null;
-    this.tiempoRestante = '';
     this.mensajeSesionExpirada = sesionExpirada;
     this.mensaje = '';
+    this.googleElemento = null;
     this.cdr.detectChanges();
     this.router.navigate(['/']);
+    this.inicializarGoogle();
   }
 }
