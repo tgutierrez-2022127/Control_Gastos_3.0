@@ -81,6 +81,7 @@ app.post('/api/auth/login', (req, res) => {
 
 app.use('/api/gastos', gastosRoutes);
 app.use('/api/ingresos', ingresosRoutes);
+app.use('/api/auth', authRoutes);
 
 const startServer = async () => {
   try {
