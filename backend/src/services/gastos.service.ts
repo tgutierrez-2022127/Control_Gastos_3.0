@@ -1,5 +1,5 @@
 import { AppDataSource } from '../config/database';
-import { Gasto, CategoriaGastoType } from '../entities/Gasto';
+import { Gasto, CategoriaGastoType, MetodoGastoType } from '../entities/Gasto';
 import { Repository } from 'typeorm';
 
 export class GastosService {
@@ -14,6 +14,7 @@ export class GastosService {
     monto: number;
     categoria: CategoriaGastoType;
     fecha: string;
+    metodo?: MetodoGastoType;
     userId: number;
   }) {
     const gasto = this.repo.create(data);
@@ -43,11 +44,17 @@ export class GastosService {
   async actualizar(
     id: number,
     userId: number,
-    data: Partial<{ descripcion: string; monto: number; categoria: CategoriaGastoType; fecha: string }>
+    data: Partial<{ descripcion: string; monto: number; categoria: CategoriaGastoType; fecha: string; metodo: MetodoGastoType }>
   ) {
     const gasto = await this.repo.findOne({ where: { id, userId } });
     if (!gasto) return null;
-    Object.assign(gasto, data);
+    const datos: Partial<Gasto> = {};
+    if (data.descripcion !== undefined) datos.descripcion = data.descripcion;
+    if (data.monto !== undefined) datos.monto = data.monto;
+    if (data.categoria !== undefined) datos.categoria = data.categoria;
+    if (data.fecha !== undefined) datos.fecha = data.fecha;
+    if (data.metodo !== undefined) datos.metodo = data.metodo;
+    Object.assign(gasto, datos);
     return this.repo.save(gasto);
   }
 
