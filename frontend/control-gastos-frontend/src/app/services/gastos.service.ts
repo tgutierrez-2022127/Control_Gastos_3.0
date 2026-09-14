@@ -1,12 +1,13 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, Subject } from 'rxjs';
 
 export interface Gasto {
   id: number;
   descripcion: string;
   monto: number;
   categoria: string;
+  metodo: string;
   fecha: string;
   createdAt: string;
 }
@@ -43,7 +44,14 @@ export class GastosService {
   private api = 'http://localhost:3000/api/gastos';
   private apiIngresos = 'http://localhost:3000/api/ingresos';
 
+  private datosCambiaron = new Subject<void>();
+  public datosCambiaron$ = this.datosCambiaron.asObservable();
+
   constructor(private http: HttpClient) {}
+
+  emitirCambios(): void {
+    this.datosCambiaron.next();
+  }
 
   // ===== Gastos =====
   listar(mes?: number, anio?: number): Observable<Gasto[]> {
@@ -58,7 +66,7 @@ export class GastosService {
     );
   }
 
-  crear(data: { descripcion: string; monto: number; categoria: string; fecha: string }): Observable<Gasto> {
+  crear(data: { descripcion: string; monto: number; categoria: string; metodo?: string; fecha: string }): Observable<Gasto> {
     return this.http.post<any>(this.api, data).pipe(
       map(r => r.data)
     );
